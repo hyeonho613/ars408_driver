@@ -147,7 +147,7 @@ void Ars408Driver::ParseRadarState(const std::array<uint8_t, 8> & in_can_data)
     ars408::RadarState::OutputTypeConfig((in_can_data[5] & 0x0Cu) >> 2u);
   current_radar_state_.CtrlRelay = ars408::RadarState::Config((in_can_data[5] & 0x02u) >> 1u);
   current_radar_state_.Rcs_Threshold =
-    ars408::RadarState::Rcs_ThresholdConfig((in_can_data[5] & 0x1Cu) >> 2u);
+    ars408::RadarState::Rcs_ThresholdConfig((in_can_data[7] & 0x1Cu) >> 2u);
   valid_radar_state_ = true;
 }
 
