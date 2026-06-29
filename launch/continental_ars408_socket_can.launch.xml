@@ -6,12 +6,19 @@
   <arg name="interface" default="can0" />
   <arg name="receiver_interval_sec" default="0.01" />
 
+  <!-- JHH - ARS408 CAN configuration param -->
+  <arg name="configure_radar" default="true" /> <!-- true: send radar config CAN at launch -->
+  <arg name="radar_output_mode" default="objects" /> <!-- MODE: objects, clusters, none -->
+  <arg name="radar_send_quality" default="true" />
+  <arg name="radar_send_ext_info" default="true" />
+  <arg name="radar_config_delay_sec" default="0.5" />
+
   <!-- ARS408 driver param -->
-  <arg name="input/frame" default="/sensing/radar/can_tx" />
+  <arg name="input/frame" default="/from_can_bus" />
   <arg name="output/objects" default="objects_raw" />
   <arg name="output/scan" default="scan" />
   <arg name="publish_radar_track" default="true" />
-  <arg name="publish_radar_scan" default="false" />
+  <arg name="publish_radar_scan" default="true" />
   <arg name="output_frame" default="ars408" />
   <arg name="sequential_publish" default="false" />
   <arg name="size_x" default="1.8" />
@@ -21,6 +28,14 @@
     <arg name="interface" value="$(var interface)" />
     <arg name="interval_sec" value="$(var receiver_interval_sec)" />
   </include>
+
+  <node
+    pkg="pe_ars408_ros"
+    exec="ars408_set_mode.py"
+    name="ars408_set_mode"
+    output="screen"
+    if="$(var configure_radar)"
+    args="--interface $(var interface) --mode $(var radar_output_mode) --quality $(var radar_send_quality) --ext-info $(var radar_send_ext_info) --delay-sec $(var radar_config_delay_sec)" />
 
   <include file="$(find-pkg-share pe_ars408_ros)/launch/continental_ars408.launch.xml">
     <arg name="input/frame" value="$(var input/frame)" />

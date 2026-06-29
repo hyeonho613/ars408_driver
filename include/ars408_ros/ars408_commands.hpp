@@ -467,6 +467,10 @@ class Cluster_0_Status : RadarCommand
 {
 public:
   Cluster_0_Status() : RadarCommand(ars408::CLUSTER_STATUS) {}
+  uint8_t NumberOfClustersNear;
+  uint8_t NumberOfClustersFar;
+  uint16_t MeasurementCounter;
+  uint8_t InterfaceVersion;
 };
 
 /*
@@ -478,6 +482,13 @@ class Cluster_1_General : RadarCommand
 {
 public:
   Cluster_1_General() : RadarCommand(ars408::CLUSTER_GENERAL) {}
+  uint8_t Id;
+  float LongitudinalDistanceX;
+  float LateralDistanceY;
+  float RelativeLongitudinalVelocityX;
+  float RelativeLateralVelocityY;
+  uint8_t DynamicProperty;
+  float Rcs;
 };
 
 /*

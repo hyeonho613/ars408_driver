@@ -33,6 +33,12 @@ rclcpp_components_register_node(pe_ars408_node_component
   EXECUTABLE pe_ars408_node
 )
 
+install(PROGRAMS
+  scripts/ars408_can_logger.py
+  scripts/ars408_set_mode.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()

@@ -84,24 +84,18 @@ void Ars408Driver::UpdateObjectExtInfo(
 
 bool Ars408Driver::DetectedObjectsReady()
 {
-  bool ready = true;
-  if (valid_radar_state_) {
-    if (updated_objects_general_ == current_objects_status_.NumberOfObjects) {
-      if (
-        current_radar_state_.SendQuality &&
-        (updated_objects_quality_ != current_objects_status_.NumberOfObjects)) {
-        ready = false;
-      }
-      if (
-        current_radar_state_.SendExtInfo &&
-        (updated_objects_ext_ != current_objects_status_.NumberOfObjects)) {
-        ready = false;
-      }
-    }
-  } else {
-    ready = false;
+  const auto expected_objects = current_objects_status_.NumberOfObjects;
+  if (expected_objects == 0) {
+    return false;
   }
-  return ready;
+  if (updated_objects_general_ != expected_objects) {
+    return false;
+  }
+
+  // In object mode, the radar may occasionally miss quality/extended frames for a cycle even
+  // when all general object frames arrived. Publishing the available objects avoids dropping the
+  // whole cycle and keeps the downstream object stream continuous.
+  return true;
 }
 
 bool Ars408Driver::GetCurrentRadarState(ars408::RadarState & out_current_state)
@@ -250,14 +244,25 @@ std::array<uint8_t, 8> Ars408Driver::GenerateRadarConfiguration(
 ars408::Obj_0_Status Ars408Driver::ParseObject0_Status(const std::array<uint8_t, 8> & in_can_data)
 {
   current_objects_status_.NumberOfObjects = in_can_data[0] & 0xFFu;
-  current_objects_status_.MeasurementCounter = (in_can_data[1] << 8u) + (in_can_data[0]);
+  current_objects_status_.MeasurementCounter = (in_can_data[2] << 8u) + in_can_data[1];
   current_objects_status_.InterfaceVersion = (in_can_data[3] & 0xF0u) >> 4u;
   return current_objects_status_;
 }
 
+ars408::Cluster_0_Status Ars408Driver::ParseCluster0_Status(
+  const std::array<uint8_t, 8> & in_can_data)
+{
+  ars408::Cluster_0_Status cluster_status;
+  cluster_status.NumberOfClustersNear = in_can_data[0] & 0xFFu;
+  cluster_status.NumberOfClustersFar = in_can_data[1] & 0xFFu;
+  cluster_status.MeasurementCounter = (in_can_data[2] << 8u) + in_can_data[3];
+  cluster_status.InterfaceVersion = (in_can_data[4] & 0xF0u) >> 4u;
+  return cluster_status;
+}
+
 ars408::RadarObject Ars408Driver::ParseObject1_General(const std::array<uint8_t, 8> & in_can_data)
 {
-  ars408::RadarObject current_object;
+  ars408::RadarObject current_object{};
   current_object.sequence_id = current_objects_status_.MeasurementCounter;
   current_object.id = in_can_data[0];
   current_object.dynamic_property = ars408::Obj_1_General::DynamicProperty(in_can_data[6] & 0x07u);
@@ -275,6 +280,32 @@ ars408::RadarObject Ars408Driver::ParseObject1_General(const std::array<uint8_t,
   uint16_t speed_y_ymp = ((in_can_data[5] & 0x3Fu) << 3u) + ((in_can_data[6] & 0xE0u) >> 5u);
   current_object.speed_lat_y = (speed_y_ymp * 0.25f - 64.0f);
   return current_object;
+}
+
+ars408::RadarObject Ars408Driver::ParseCluster1_General(const std::array<uint8_t, 8> & in_can_data)
+{
+  ars408::RadarObject current_cluster{};
+  current_cluster.sequence_id = current_objects_status_.MeasurementCounter;
+  current_cluster.id = in_can_data[0];
+  current_cluster.rcs = (in_can_data[7] * 0.5) - 64.0;
+
+  uint16_t dist_x_tmp = (in_can_data[1] << 5u) + ((in_can_data[2] & 0xF8u) >> 3u);
+  current_cluster.distance_long_x = dist_x_tmp * 0.2f - 500.0f;
+
+  uint16_t dist_y_tmp = ((in_can_data[2] & 0x03u) << 8u) + in_can_data[3];
+  current_cluster.distance_lat_y = dist_y_tmp * 0.2f - 102.4f;
+
+  uint16_t speed_x_tmp = (in_can_data[4] << 2u) + ((in_can_data[5] & 0xC0u) >> 6u);
+  current_cluster.speed_long_x = (speed_x_tmp * 0.25f) - 128.0f;
+
+  uint16_t speed_y_tmp = ((in_can_data[5] & 0x3Fu) << 3u) + ((in_can_data[6] & 0xE0u) >> 5u);
+  current_cluster.speed_lat_y = (speed_y_tmp * 0.25f - 64.0f);
+  current_cluster.dynamic_property =
+    ars408::Obj_1_General::DynamicProperty(in_can_data[6] & 0x07u);
+
+  current_cluster.object_class = ars408::Obj_3_Extended::ObjectClassProperty::POINT;
+  current_cluster.probability_existence = 1.0f;
+  return current_cluster;
 }
 
 ars408::Obj_2_Quality Ars408Driver::ParseObject2_Quality(const std::array<uint8_t, 8> & in_can_data)
@@ -361,20 +392,48 @@ std::string Ars408Driver::Parse(
   const uint32_t & can_id, const std::array<uint8_t, 8> & in_can_data,
   const uint8_t & in_data_length)
 {
+  const bool is_cluster_frame =
+    can_id == ars408::CLUSTER_STATUS || can_id == ars408::CLUSTER_GENERAL ||
+    can_id == ars408::CLUSTER_QUALITY;
+
   switch (can_id) {
     case ars408::RADAR_STATE:  /// 0x201 the current configuration and sensor state in message
       if (ars408::RADAR_STATE_BYTES == in_data_length) {
         ParseRadarState(in_can_data);
       }
       break;
+    case ars408::CLUSTER_STATUS:  /// 0x600 contains cluster list header information
+      if (ars408::CLUSTER_STATUS_BYTES == in_data_length) {
+        if (!sequential_publish_ && !radar_objects_.empty()) {
+          CallDetectedObjectsCallback(radar_objects_);
+        }
+        ClearRadarObjects();
+        const ars408::Cluster_0_Status cluster_status = ParseCluster0_Status(in_can_data);
+        const uint16_t total_clusters =
+          static_cast<uint16_t>(cluster_status.NumberOfClustersNear) +
+          static_cast<uint16_t>(cluster_status.NumberOfClustersFar);
+        current_objects_status_.NumberOfObjects =
+          total_clusters > 255u ? 255u : static_cast<uint8_t>(total_clusters);
+        current_objects_status_.MeasurementCounter = cluster_status.MeasurementCounter;
+        current_objects_status_.InterfaceVersion = cluster_status.InterfaceVersion;
+      }
+      break;
+    case ars408::CLUSTER_GENERAL:  /// 0x701 contains the position and velocity of the clusters
+      if (ars408::CLUSTER_GENERAL_BYTES == in_data_length) {
+        ars408::RadarObject cluster = ParseCluster1_General(in_can_data);
+        AddDetectedObject(cluster);
+      }
+      break;
+    case ars408::CLUSTER_QUALITY:  /// 0x702 contains cluster quality information
+      break;
     case ars408::OBJ_STATUS:  /// 0x60A contains list header information,
                               /// i.e. the number of objects that are sent afterwards
       if (ars408::OBJ_STATUS_BYTES == in_data_length) {
-        // ars408::Obj_0_Status object_status = ParseObject0_Status(in_can_data);
         if (!sequential_publish_ && DetectedObjectsReady()) {
           CallDetectedObjectsCallback(radar_objects_);
         }
         ClearRadarObjects();
+        current_objects_status_ = ParseObject0_Status(in_can_data);
       }
       break;
     case ars408::OBJ_GENERAL:  /// 0x60B contains the position and velocity of the objects
@@ -397,7 +456,11 @@ std::string Ars408Driver::Parse(
       break;
   }
 
-  if (sequential_publish_ && DetectedObjectsReady()) {
+  if (
+    sequential_publish_ && is_cluster_frame && current_objects_status_.NumberOfObjects > 0 &&
+    updated_objects_general_ == current_objects_status_.NumberOfObjects) {
+    CallDetectedObjectsCallback(radar_objects_);
+  } else if (sequential_publish_ && !is_cluster_frame && DetectedObjectsReady()) {
     CallDetectedObjectsCallback(radar_objects_);
   }
 

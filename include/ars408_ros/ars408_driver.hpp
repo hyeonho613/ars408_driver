@@ -116,6 +116,20 @@ private:
    */
   ars408::Obj_3_Extended ParseObject3_Extended(const std::array<uint8_t, 8> & in_can_data);
 
+  /**
+   * Parses Cluster0_Status CAN 0x600
+   * @param in_can_data std::array<uint8_t, 8>
+   * @return cluster status filled with the current number of clusters
+   */
+  ars408::Cluster_0_Status ParseCluster0_Status(const std::array<uint8_t, 8> & in_can_data);
+
+  /**
+   * Parses Cluster1_General CAN 0x701
+   * @param in_can_data std::array<uint8_t, 8> containing the CAN message
+   * @return radar object filled from one cluster, for reuse by the existing publishers
+   */
+  ars408::RadarObject ParseCluster1_General(const std::array<uint8_t, 8> & in_can_data);
+
 public:
   /**
    * Parses incoming can_id and its byte array can_data
