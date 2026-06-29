@@ -8,7 +8,7 @@
 
   <!-- JHH - ARS408 CAN configuration param -->
   <arg name="configure_radar" default="true" /> <!-- true: send radar config CAN at launch -->
-  <arg name="radar_output_mode" default="objects" /> <!-- MODE: objects, clusters, none -->
+  <arg name="radar_output_mode" default="none" /> <!-- MODE: objects, clusters, none -->
   <arg name="radar_send_quality" default="true" />
   <arg name="radar_send_ext_info" default="true" />
   <arg name="radar_config_delay_sec" default="0.5" />
